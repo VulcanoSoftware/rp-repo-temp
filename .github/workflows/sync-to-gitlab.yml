@@ -17,8 +17,11 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Install glab
-        run: curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
 
       - name: Sync GitHub → GitLab
         env:
@@ -29,30 +32,81 @@ jobs:
         run: |
           set -e
 
-          echo "Synchroniseren van GitHub tag $TARGET_TAG → GitLab..."
+          echo "=== Start synchronisatie GitHub → GitLab ==="
 
+          # Login bij GitLab
           echo "$GITLAB_TOKEN" | glab auth login --stdin --hostname gitlab.com
 
-          # Zorg dat release 1.0 bestaat op GitLab
-          if ! glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
-            glab release create "$TARGET_TAG" --repo "$GITLAB_REPO" \
-              --name "Resource Pack 1.0" \
-              --notes "Automatisch gesynchroniseerd vanaf GitHub"
+          PROJECT_API="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')"
+
+          # -------------------------------------------------------
+          # 1. Controleer of de repository geïnitialiseerd is
+          # -------------------------------------------------------
+          echo "Controleren of de GitLab-repo al commits heeft..."
+
+          DEFAULT_BRANCH=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+            "$PROJECT_API" | jq -r '.default_branch // empty')
+
+          if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
+            echo "Repository is leeg → README.md wordt aangemaakt om de repo te initialiseren"
+
+            # Maak een simpele README aan (dit creëert automatisch de main branch)
+            curl -s --request POST \
+              --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+              --header "Content-Type: application/json" \
+              --data '{
+                "branch": "main",
+                "content": "# Resource Pack Mirror\n\nDeze repository wordt automatisch gesynchroniseerd vanaf GitHub.\n",
+                "commit_message": "Initialize repository with README"
+              }' \
+              "$PROJECT_API/repository/files/README.md"
+
+            echo "README.md aangemaakt, default branch is nu 'main'"
+            DEFAULT_BRANCH="main"
+          else
+            echo "Default branch gevonden: $DEFAULT_BRANCH"
           fi
 
-          # Alle assets van GitHub 1.0 ophalen
+          # -------------------------------------------------------
+          # 2. Zorg dat release / tag 1.0 bestaat
+          # -------------------------------------------------------
+          echo "Controleren of release $TARGET_TAG bestaat..."
+
+          if ! glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
+            echo "Release $TARGET_TAG bestaat nog niet → wordt aangemaakt"
+
+            glab release create "$TARGET_TAG" \
+              --repo "$GITLAB_REPO" \
+              --name "Resource Pack 1.0" \
+              --notes "Automatisch gesynchroniseerd vanaf GitHub" \
+              --ref "$DEFAULT_BRANCH"
+          else
+            echo "Release $TARGET_TAG bestaat al"
+          fi
+
+          # -------------------------------------------------------
+          # 3. Bestanden van GitHub tag 1.0 ophalen en uploaden
+          # -------------------------------------------------------
+          echo "Bestanden synchroniseren..."
+
           ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
+
+          if [ -z "$ASSETS" ]; then
+            echo "Geen bestanden gevonden op GitHub tag $TARGET_TAG"
+            exit 0
+          fi
 
           echo "$ASSETS" | jq -c '.' | while read -r asset; do
             NAME=$(echo "$asset" | jq -r '.name')
             URL=$(echo "$asset" | jq -r '.url')
 
-            echo "→ $NAME"
+            echo "→ Uploaden: $NAME"
 
             curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
               -o "$NAME" "$URL"
 
+            # Upload (overschrijft als het bestand al bestaat)
             glab release upload "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO" --clobber
           done
 
-          echo "Synchronisatie voltooid."
+          echo "=== Synchronisatie succesvol voltooid ==="
