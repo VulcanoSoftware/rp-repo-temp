@@ -1,4 +1,4 @@
-name: Sync to All Mirrors + Update mirrors.txt
+name: Sync to jsDelivr
 
 on:
   workflow_run:
@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  sync-all:
+  sync:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
@@ -21,65 +21,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-      - name: Sync to GitHub (tag 1.0)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_TAG: "1.0"
-        run: |
-          set -e
-          echo "Sync GitHub tag 1.0"
-
-      - name: Sync to GitLab
-        env:
-          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLAB_REPO: ${{ secrets.GITLAB_REPO }}
-          TARGET_TAG: "1.0"
-        run: |
-          set -e
-          echo "Sync GitHub → GitLab..."
-
-          echo "$GITLAB_TOKEN" | glab auth login --stdin --hostname gitlab.com
-
-          if ! glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
-            glab release create "$TARGET_TAG" --repo "$GITLAB_REPO" --name "Resource Pack 1.0" --ref "main"
-          fi
-
-          ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
-
-          if [ -z "$ASSETS" ]; then
-            echo "Geen assets gevonden op GitHub"
-            exit 0
-          fi
-
-          echo "$ASSETS" | jq -c '.' | while read -r asset; do
-            NAME=$(echo "$asset" | jq -r '.name')
-            URL=$(echo "$asset" | jq -r '.url')
-
-            curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" -o "$NAME" "$URL"
-
-            PROJECT_API="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')"
-
-            UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
-
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-              --upload-file "$NAME" \
-              "$UPLOAD_URL")
-
-            if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
-              echo "   Succesvol geüpload"
-            else
-              echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
-              exit 1
-            fi
-          done
-
-          echo "GitLab sync voltooid."
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Sync to jsDelivr
         env:
@@ -87,7 +29,7 @@ jobs:
           TARGET_TAG: "1.0"
         run: |
           set -e
-          echo "Sync naar jsDelivr..."
+          echo "=== Sync naar jsDelivr ==="
 
           ASSETS=$(gh release view "$TARGET_TAG" --json assets -q '.assets[] | {name: .name, url: .url}')
 
@@ -100,7 +42,10 @@ jobs:
             NAME=$(echo "$asset" | jq -r '.name')
             URL=$(echo "$asset" | jq -r '.url')
 
-            curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" -o "$NAME" "$URL"
+            echo "→ Uploaden naar jsDelivr: $NAME"
+
+            curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
+              -o "$NAME" "$URL"
 
             curl -s -X PUT -H "Content-Type: application/octet-stream" \
               -H "Content-Disposition: attachment; filename=\"$NAME\"" \
@@ -111,19 +56,3 @@ jobs:
           done
 
           echo "jsDelivr sync voltooid."
-
-      - name: Update mirrors.txt
-        run: |
-          set -e
-          echo "Update mirrors.txt..."
-
-          echo "github:https://github.com/VulcanoSoftware/vulcanocraft_resourcepack/releases/download/1.0/VulcanoPackEnhancedExplosions.zip" > mirrors.txt
-          echo "gitlab:https://gitlab.com/api/v4/projects/vulcanosoftwareinc%2Frp-repo-temp/packages/generic/resource-pack/1.0/VulcanoPackEnhancedExplosions.zip" >> mirrors.txt
-          echo "jsdelivr:https://cdn.jsdelivr.net/gh/VulcanoSoftware/vulcanocraft_resourcepack@1.0/VulcanoPackEnhancedExplositions.zip" >> mirrors.txt
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add mirrors.txt
-          git diff --staged --quiet || git commit -m "Update mirrors.txt (automatic sync from GitHub + GitLab + jsDelivr)"
-          git push
