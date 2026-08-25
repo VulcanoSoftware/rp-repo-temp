@@ -28,7 +28,7 @@ jobs:
           set -e
           echo "=== Sync naar jsDelivr ==="
 
-          # Haal de assets op van GitHub tag 1.0
+          # Haal assets op van GitHub tag 1.0
           ASSETS=$(gh release view "$TARGET_TAG" --json assets -q '.assets[] | {name: .name, url: .url}')
 
           if [ -z "$ASSETS" ]; then
