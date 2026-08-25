@@ -110,7 +110,7 @@ jobs:
               UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
 
               # === FORCE OVERSCHRIJVEN ===
-              # Verwijder het hele package (dit verwijdert alle oude bestanden)
+              # Verwijder het hele package volledig (dit verwijdert alle oude bestanden)
               PACKAGE_LIST=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
                 "$PROJECT_API/packages?package_name=resource-pack&package_version=$TARGET_TAG")
 
