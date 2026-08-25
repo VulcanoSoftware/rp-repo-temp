@@ -1,0 +1,63 @@
+name: Sync to jsDelivr
+
+on:
+  workflow_run:
+    workflows: ["Sync to GitLab"]
+    types:
+      - completed
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Sync to jsDelivr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JSDELIVR_TOKEN: ${{ secrets.JSDELIVR_TOKEN }}
+          TARGET_TAG: "1.0"
+          GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
+        run: |
+          set -e
+
+          echo "=== Sync naar jsDelivr ==="
+
+          ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
+
+          if [ -z "$ASSETS" ]; then
+            echo "Geen assets gevonden"
+            exit 0
+          fi
+
+          echo "$ASSETS" | jq -c '.' | while read -r asset; do
+            NAME=$(echo "$asset" | jq -r '.name')
+            URL=$(echo "$asset" | jq -r '.url')
+
+            echo "→ Uploaden naar jsDelivr: $NAME"
+
+            curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
+              -o "$NAME" "$URL"
+
+            curl -s -X PUT -H "Authorization: token $JSDELIVR_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              -H "Content-Disposition: attachment; filename=\"$NAME\"" \
+              --upload-file "$NAME" \
+              "https://data.jsdelivr.com/v1/package/gh/VulcanoSoftware/vulcanocraft_resourcepack@1.0/$NAME" \
+              -w "%{http_code}\n" -o /dev/null
+
+            echo "   Succesvol geüpload"
+          done
+
+          echo "jsDelivr sync voltooid."
