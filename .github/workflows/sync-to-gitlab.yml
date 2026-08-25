@@ -42,9 +42,8 @@ jobs:
           # -------------------------------------------------------
           # 1. Zorg dat er altijd een geldige commit op main staat
           # -------------------------------------------------------
-          echo "README.md forceren op branch main (om een geldige ref te hebben)..."
+          echo "README.md forceren op branch main..."
 
-          # Probeer eerst of het bestand al bestaat
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "$FILE_API?ref=main")
 
           if [ "$HTTP_CODE" = "200" ]; then
@@ -57,7 +56,7 @@ jobs:
                 "content": "# Resource Pack Mirror\n\nDeze repository wordt automatisch gesynchroniseerd vanaf GitHub.\n\nLaatste sync: '"$(date -u)'"'\n",
                 "commit_message": "Update README (sync)"
               }' \
-              "$FILE_API"
+              "$FILE_API" > /dev/null
           else
             echo "README.md bestaat nog niet → wordt aangemaakt"
             curl -s --request POST \
@@ -68,7 +67,7 @@ jobs:
                 "content": "# Resource Pack Mirror\n\nDeze repository wordt automatisch gesynchroniseerd vanaf GitHub.\n",
                 "commit_message": "Initialize repository with README"
               }' \
-              "$FILE_API"
+              "$FILE_API" > /dev/null
           fi
 
           echo "README.md is aanwezig op main"
@@ -80,7 +79,6 @@ jobs:
 
           if ! glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
             echo "Release $TARGET_TAG bestaat nog niet → wordt aangemaakt"
-
             glab release create "$TARGET_TAG" \
               --repo "$GITLAB_REPO" \
               --name "Resource Pack 1.0" \
@@ -108,10 +106,15 @@ jobs:
 
             echo "→ Uploaden: $NAME"
 
+            # Download van GitHub
             curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
               -o "$NAME" "$URL"
 
-            glab release upload "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO" --clobber
+            # Verwijder bestaand bestand op GitLab (als het bestaat) zodat we kunnen overschrijven
+            glab release delete-asset "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO" --yes 2>/dev/null || true
+
+            # Upload het nieuwe bestand
+            glab release upload "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO"
           done
 
           echo "=== Synchronisatie succesvol voltooid ==="
