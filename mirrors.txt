@@ -1,6 +1,3 @@
-gitlab:https://gitlab.com/api/v4/projects/vulcanosoftwareinc%2Frp-repo-temp/packages/generic/resource-pack/1.0/empty_resource_pack.zip
-gitlab:https://gitlab.com/api/v4/projects/vulcanosoftwareinc%2Frp-repo-temp/packages/generic/resource-pack/1.0/empty_resource_pack.zip.sha1
-gitlab:https://gitlab.com/api/v4/projects/vulcanosoftwareinc%2Frp-repo-temp/packages/generic/resource-pack/1.0/VulcanoPack.zip
-gitlab:https://gitlab.com/api/v4/projects/vulcanosoftwareinc%2Frp-repo-temp/packages/generic/resource-pack/1.0/VulcanoPack.zip.sha1
+github:https://github.com/VulcanoSoftware/vulcanocraft_resourcepack/releases/download/1.0/VulcanoPackEnhancedExplosions.zip
 gitlab:https://gitlab.com/api/v4/projects/vulcanosoftwareinc%2Frp-repo-temp/packages/generic/resource-pack/1.0/VulcanoPackEnhancedExplosions.zip
-gitlab:https://gitlab.com/api/v4/projects/vulcanosoftwareinc%2Frp-repo-temp/packages/generic/resource-pack/1.0/VulcanoPackEnhancedExplosions.zip.sha1
+jsdelivr:https://cdn.jsdelivr.net/gh/VulcanoSoftware/vulcanocraft_resourcepack@1.0/VulcanoPackEnhancedExplosions.zip
