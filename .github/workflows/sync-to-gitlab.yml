@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # nodig om mirrors.txt te kunnen committen
+  contents: write   # nodig om mirrors.txt te committen
 
 jobs:
   sync:
@@ -40,7 +40,6 @@ jobs:
           echo "$GITLAB_TOKEN" | glab auth login --stdin --hostname gitlab.com
 
           PROJECT_API="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')"
-          FILE_API="$PROJECT_API/repository/files/README.md"
           PACKAGE_BASE="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')/packages/generic/resource-pack/$TARGET_TAG"
 
           # -------------------------------------------------------
@@ -48,6 +47,7 @@ jobs:
           # -------------------------------------------------------
           echo "README.md forceren op branch main..."
 
+          FILE_API="$PROJECT_API/repository/files/README.md"
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "$FILE_API?ref=main")
 
           if [ "$HTTP_CODE" = "200" ]; then
@@ -103,11 +103,22 @@ jobs:
 
               echo "→ Uploaden: $NAME"
 
+              # Download van GitHub
               curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
                 -o "$NAME" "$URL"
 
               UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
 
+              # Force overschrijven: verwijder oude versie als hij bestaat
+              CHECK_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
+              HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$CHECK_URL")
+
+              if [ "$HTTP_CHECK" = "200" ] || [ "$HTTP_CHECK" = "201" ]; then
+                echo "   Oude versie gevonden, verwijderen..."
+                curl -s -X DELETE -H "PRIVATE-TOKEN: $GITLAB_TOKEN" "$CHECK_URL" > /dev/null
+              fi
+
+              # Uploaden
               HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
                 --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
                 --upload-file "$NAME" \
@@ -115,7 +126,6 @@ jobs:
 
               if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
                 echo "   Succesvol geüpload"
-                # Regel toevoegen aan mirrors.txt
                 echo "gitlab:${PACKAGE_BASE}/${NAME}" >> mirrors.txt
               else
                 echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
