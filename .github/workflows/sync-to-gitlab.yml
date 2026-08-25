@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # nodig om mirrors.txt te committen
+  contents: write
 
 jobs:
   sync:
@@ -85,7 +85,7 @@ jobs:
           fi
 
           # -------------------------------------------------------
-          # 3. Bestanden synchroniseren + mirrors.txt opbouwen
+          # 3. Bestanden synchroniseren + mirrors.txt + force replace
           # -------------------------------------------------------
           echo "Bestanden synchroniseren..."
 
@@ -109,16 +109,19 @@ jobs:
 
               UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
 
-              # Force overschrijven: verwijder oude versie als hij bestaat
-              CHECK_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
-              HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$CHECK_URL")
+              # === FORCE OVERSCHRIJVEN ===
+              # Verwijder het package volledig (dit verwijdert alle bestanden + versie)
+              PACKAGE_ID=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+                "$PROJECT_API/packages?package_name=resource-pack&package_version=$TARGET_TAG" \
+                | jq -r '.[0].id')
 
-              if [ "$HTTP_CHECK" = "200" ] || [ "$HTTP_CHECK" = "201" ]; then
-                echo "   Oude versie gevonden, verwijderen..."
-                curl -s -X DELETE -H "PRIVATE-TOKEN: $GITLAB_TOKEN" "$CHECK_URL" > /dev/null
+              if [ "$PACKAGE_ID" != "null" ] && [ "$PACKAGE_ID" != "" ]; then
+                echo "   Package bestaat, verwijderen..."
+                curl -s -X DELETE -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+                  "$PROJECT_API/packages/$PACKAGE_ID" > /dev/null
               fi
 
-              # Uploaden
+              # Uploaden (nu bestaat er geen package meer)
               HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
                 --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
                 --upload-file "$NAME" \
@@ -139,7 +142,7 @@ jobs:
           cat mirrors.txt
 
           # -------------------------------------------------------
-          # 4. mirrors.txt committen naar de GitHub repo
+          # 4. mirrors.txt committen
           # -------------------------------------------------------
           echo "mirrors.txt committen..."
 
