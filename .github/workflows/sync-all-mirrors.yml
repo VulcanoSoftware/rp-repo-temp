@@ -24,6 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
+          curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
 
       - name: Sync to GitHub (tag 1.0)
         env:
@@ -32,14 +33,13 @@ jobs:
         run: |
           set -e
           echo "Sync GitHub tag 1.0"
-          # Geen actie nodig, want we vertrouwen op de release zelf
 
       - name: Sync to GitLab
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLAB_REPO: ${{ secrets.GITLAB_REPO }}   # uit secret halen
           TARGET_TAG: "1.0"
-          GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
         run: |
           set -e
           echo "Sync GitHub → GitLab..."
