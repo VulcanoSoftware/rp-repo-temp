@@ -2,7 +2,7 @@ name: Sync to jsDelivr
 
 on:
   workflow_run:
-    workflows: ["Sync to GitLab"]
+    workflows: ["Update Resource Pack (GitHub tag 1.0)"]
     types:
       - completed
 
@@ -28,13 +28,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JSDELIVR_TOKEN: ${{ secrets.JSDELIVR_TOKEN }}
           TARGET_TAG: "1.0"
-          GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
         run: |
           set -e
 
           echo "=== Sync naar jsDelivr ==="
 
-          ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
+          ASSETS=$(gh release view "$TARGET_TAG" --json assets -q '.assets[] | {name: .name, url: .url}')
 
           if [ -z "$ASSETS" ]; then
             echo "Geen assets gevonden"
