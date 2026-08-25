@@ -1,4 +1,4 @@
-name: Sync to GitLab
+name: Sync to GitLab + jsDelivr
 
 on:
   workflow_run:
@@ -32,10 +32,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TAG: "1.0"
           GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
+          CDN_URL: "https://cdn.jsdelivr.net/gh/vulcanosoftwareinc/rp-repo-temp@1.0"
         run: |
           set -e
 
-          echo "=== Start synchronisatie GitHub → GitLab ==="
+          echo "=== Start synchronisatie GitHub → GitLab + jsDelivr ==="
 
           echo "$GITLAB_TOKEN" | glab auth login --stdin --hostname gitlab.com
 
@@ -96,7 +97,7 @@ jobs:
             --ref "main"
 
           # -------------------------------------------------------
-          # 4. Bestanden uploaden + mirrors.txt
+          # 4. Bestanden uploaden + mirrors.txt (nu met jsDelivr)
           # -------------------------------------------------------
           echo "Bestanden synchroniseren..."
 
@@ -126,6 +127,7 @@ jobs:
               if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
                 echo "   Succesvol geüpload"
                 echo "gitlab:${PACKAGE_BASE}/${NAME}" >> mirrors.txt
+                echo "jsDelivr:${CDN_URL}/${NAME}" >> mirrors.txt
               else
                 echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
                 exit 1
