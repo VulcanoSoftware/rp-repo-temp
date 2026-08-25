@@ -40,45 +40,41 @@ jobs:
           FILE_API="$PROJECT_API/repository/files/README.md"
 
           # -------------------------------------------------------
-          # 1. Zorg dat er altijd een geldige commit op main staat
+          # 1. Zorg dat er een geldige commit op main staat
           # -------------------------------------------------------
           echo "README.md forceren op branch main..."
 
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "$FILE_API?ref=main")
 
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "README.md bestaat al → wordt geüpdatet"
             curl -s --request PUT \
               --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
               --header "Content-Type: application/json" \
               --data '{
                 "branch": "main",
-                "content": "# Resource Pack Mirror\n\nDeze repository wordt automatisch gesynchroniseerd vanaf GitHub.\n\nLaatste sync: '"$(date -u)'"'\n",
+                "content": "# Resource Pack Mirror\n\nAutomatisch gesynchroniseerd vanaf GitHub.\n",
                 "commit_message": "Update README (sync)"
               }' \
               "$FILE_API" > /dev/null
           else
-            echo "README.md bestaat nog niet → wordt aangemaakt"
             curl -s --request POST \
               --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
               --header "Content-Type: application/json" \
               --data '{
                 "branch": "main",
-                "content": "# Resource Pack Mirror\n\nDeze repository wordt automatisch gesynchroniseerd vanaf GitHub.\n",
+                "content": "# Resource Pack Mirror\n\nAutomatisch gesynchroniseerd vanaf GitHub.\n",
                 "commit_message": "Initialize repository with README"
               }' \
               "$FILE_API" > /dev/null
           fi
 
-          echo "README.md is aanwezig op main"
+          echo "README.md is aanwezig"
 
           # -------------------------------------------------------
-          # 2. Zorg dat release / tag 1.0 bestaat
+          # 2. Zorg dat release 1.0 bestaat
           # -------------------------------------------------------
-          echo "Controleren of release $TARGET_TAG bestaat..."
-
           if ! glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
-            echo "Release $TARGET_TAG bestaat nog niet → wordt aangemaakt"
+            echo "Release $TARGET_TAG wordt aangemaakt"
             glab release create "$TARGET_TAG" \
               --repo "$GITLAB_REPO" \
               --name "Resource Pack 1.0" \
@@ -89,14 +85,14 @@ jobs:
           fi
 
           # -------------------------------------------------------
-          # 3. Bestanden van GitHub tag 1.0 ophalen en uploaden
+          # 3. Bestanden uploaden via Generic Package Registry
           # -------------------------------------------------------
-          echo "Bestanden synchroniseren..."
+          echo "Bestanden synchroniseren via Generic Packages..."
 
           ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
 
           if [ -z "$ASSETS" ]; then
-            echo "Geen bestanden gevonden op GitHub tag $TARGET_TAG"
+            echo "Geen bestanden gevonden op GitHub"
             exit 0
           fi
 
@@ -110,11 +106,24 @@ jobs:
             curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
               -o "$NAME" "$URL"
 
-            # Verwijder bestaand bestand op GitLab (als het bestaat) zodat we kunnen overschrijven
-            glab release delete-asset "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO" --yes 2>/dev/null || true
+            # Upload naar GitLab Generic Package Registry
+            # URL wordt: /packages/generic/resource-pack/1.0/FILENAME
+            UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
 
-            # Upload het nieuwe bestand
-            glab release upload "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO"
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+              --upload-file "$NAME" \
+              "$UPLOAD_URL")
+
+            if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
+              echo "   Succesvol geüpload (HTTP $HTTP_STATUS)"
+            else
+              echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
+              exit 1
+            fi
           done
 
           echo "=== Synchronisatie succesvol voltooid ==="
+          echo ""
+          echo "Bestanden zijn bereikbaar via:"
+          echo "https://gitlab.com/$GITLAB_REPO/-/packages/"
