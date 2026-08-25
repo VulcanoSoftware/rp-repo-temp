@@ -34,23 +34,32 @@ jobs:
 
           echo "=== Start synchronisatie GitHub → GitLab ==="
 
-          # Login bij GitLab
           echo "$GITLAB_TOKEN" | glab auth login --stdin --hostname gitlab.com
 
           PROJECT_API="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')"
+          FILE_API="$PROJECT_API/repository/files/README.md"
 
           # -------------------------------------------------------
-          # 1. Controleer of de repository geïnitialiseerd is
+          # 1. Zorg dat er altijd een geldige commit op main staat
           # -------------------------------------------------------
-          echo "Controleren of de GitLab-repo al commits heeft..."
+          echo "README.md forceren op branch main (om een geldige ref te hebben)..."
 
-          DEFAULT_BRANCH=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-            "$PROJECT_API" | jq -r '.default_branch // empty')
+          # Probeer eerst of het bestand al bestaat
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "$FILE_API?ref=main")
 
-          if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
-            echo "Repository is leeg → README.md wordt aangemaakt om de repo te initialiseren"
-
-            # Maak een simpele README aan (dit creëert automatisch de main branch)
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "README.md bestaat al → wordt geüpdatet"
+            curl -s --request PUT \
+              --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+              --header "Content-Type: application/json" \
+              --data '{
+                "branch": "main",
+                "content": "# Resource Pack Mirror\n\nDeze repository wordt automatisch gesynchroniseerd vanaf GitHub.\n\nLaatste sync: '"$(date -u)'"'\n",
+                "commit_message": "Update README (sync)"
+              }' \
+              "$FILE_API"
+          else
+            echo "README.md bestaat nog niet → wordt aangemaakt"
             curl -s --request POST \
               --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
               --header "Content-Type: application/json" \
@@ -59,13 +68,10 @@ jobs:
                 "content": "# Resource Pack Mirror\n\nDeze repository wordt automatisch gesynchroniseerd vanaf GitHub.\n",
                 "commit_message": "Initialize repository with README"
               }' \
-              "$PROJECT_API/repository/files/README.md"
-
-            echo "README.md aangemaakt, default branch is nu 'main'"
-            DEFAULT_BRANCH="main"
-          else
-            echo "Default branch gevonden: $DEFAULT_BRANCH"
+              "$FILE_API"
           fi
+
+          echo "README.md is aanwezig op main"
 
           # -------------------------------------------------------
           # 2. Zorg dat release / tag 1.0 bestaat
@@ -79,7 +85,7 @@ jobs:
               --repo "$GITLAB_REPO" \
               --name "Resource Pack 1.0" \
               --notes "Automatisch gesynchroniseerd vanaf GitHub" \
-              --ref "$DEFAULT_BRANCH"
+              --ref "main"
           else
             echo "Release $TARGET_TAG bestaat al"
           fi
@@ -105,7 +111,6 @@ jobs:
             curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
               -o "$NAME" "$URL"
 
-            # Upload (overschrijft als het bestand al bestaat)
             glab release upload "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO" --clobber
           done
 
