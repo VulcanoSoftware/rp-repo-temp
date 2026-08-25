@@ -1,13 +1,11 @@
 name: Sync to GitLab
 
 on:
-  # Automatisch na een geslaagde GitHub update
   workflow_run:
     workflows: ["Update Resource Pack (GitHub tag 1.0)"]
     types:
       - completed
 
-  # Ook handmatig te starten
   workflow_dispatch:
 
 permissions:
@@ -16,7 +14,6 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Alleen draaien als de vorige workflow geslaagd is (of handmatig gestart)
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
