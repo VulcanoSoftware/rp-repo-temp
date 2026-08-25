@@ -1,4 +1,4 @@
-name: Update Resource Pack to tag 1.0
+name: Update Resource Pack (GitHub tag 1.0)
 
 on:
   release:
@@ -10,17 +10,14 @@ permissions:
 jobs:
   update-1-0:
     runs-on: ubuntu-latest
-    # Voorkom dat de workflow draait als iemand per ongeluk tag 1.0 opnieuw publiceert
     if: github.event.release.tag_name != '1.0'
 
     steps:
-      - name: Checkout (niet echt nodig, maar handig)
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Process uploaded zip files
         env:
@@ -30,25 +27,21 @@ jobs:
         run: |
           set -e
 
-          echo "Tijdelijke release: $TEMP_TAG"
-          echo "Doel tag: $TARGET_TAG"
+          echo "Tijdelijke release: $TEMP_TAG → doel: $TARGET_TAG"
 
-          # Zorg dat tag 1.0 bestaat (maak hem aan als hij nog niet bestaat)
+          # Zorg dat tag 1.0 bestaat
           if ! gh release view "$TARGET_TAG" > /dev/null 2>&1; then
-            echo "Tag $TARGET_TAG bestaat nog niet → wordt aangemaakt"
-            gh release create "$TARGET_TAG" --title "Resource Pack 1.0" --notes "Permanente release voor de resource pack(s)"
+            gh release create "$TARGET_TAG" --title "Resource Pack 1.0" --notes "Permanente release"
           fi
 
-          # Haal alle assets van de tijdelijke release op
-          TEMP_ASSETS=$(gh release view "$TEMP_TAG" --json assets -q '.assets[] | select(.name | endswith(".zip") or endswith(".ZIP")) | {name: .name, url: .url, id: .id}')
+          TEMP_ASSETS=$(gh release view "$TEMP_TAG" --json assets -q '.assets[] | select(.name | test("\\.zip$"; "i")) | {name: .name, url: .url}')
 
           if [ -z "$TEMP_ASSETS" ]; then
-            echo "Geen .zip bestanden gevonden in de tijdelijke release. Stop."
+            echo "Geen .zip bestanden gevonden."
             exit 0
           fi
 
-          # Haal de huidige assets van tag 1.0 op (voor case-insensitive matching)
-          CURRENT_ASSETS=$(gh api "repos/${{ github.repository }}/releases/tags/$TARGET_TAG" --jq '.assets[] | {name: .name, id: .id}')
+          CURRENT_ASSETS=$(gh api "repos/${{ github.repository }}/releases/tags/$TARGET_TAG" --jq '.assets[] | {name: .name}')
 
           echo "$TEMP_ASSETS" | jq -c '.' | while read -r asset; do
             ORIGINAL_NAME=$(echo "$asset" | jq -r '.name')
@@ -56,58 +49,38 @@ jobs:
             LOWER_NAME=$(echo "$ORIGINAL_NAME" | tr '[:upper:]' '[:lower:]')
 
             echo ""
-            echo "=== Verwerken van: $ORIGINAL_NAME ==="
+            echo "=== Verwerken: $ORIGINAL_NAME ==="
 
-            # Zoek of er al een bestand met dezelfde naam (case-insensitive) in 1.0 staat
             MATCHING_NAME=""
-            MATCHING_ID=""
-
             while read -r current; do
               CURRENT_NAME=$(echo "$current" | jq -r '.name')
-              CURRENT_LOWER=$(echo "$CURRENT_NAME" | tr '[:upper:]' '[:lower:]')
-
-              if [ "$CURRENT_LOWER" = "$LOWER_NAME" ]; then
+              if [ "$(echo "$CURRENT_NAME" | tr '[:upper:]' '[:lower:]')" = "$LOWER_NAME" ]; then
                 MATCHING_NAME="$CURRENT_NAME"
-                MATCHING_ID=$(echo "$current" | jq -r '.id')
                 break
               fi
             done <<< "$(echo "$CURRENT_ASSETS" | jq -c '.')"
 
-            # Download de nieuwe zip
-            echo "Downloaden van $ORIGINAL_NAME..."
             curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
               -o "new_pack.zip" "$DOWNLOAD_URL"
 
-            # Bereken SHA-1
             SHA1=$(sha1sum new_pack.zip | awk '{print $1}')
             echo "SHA-1: $SHA1"
 
             if [ -n "$MATCHING_NAME" ]; then
-              # === UPDATE van bestaand bestand ===
-              echo "Match gevonden → update van '$MATCHING_NAME'"
-
-              # Verwijder oude zip + oude .sha1 uit tag 1.0
-              echo "Verwijderen van oude bestanden..."
+              echo "Update van bestaande file: $MATCHING_NAME"
               gh release delete-asset "$TARGET_TAG" "$MATCHING_NAME" --yes || true
               gh release delete-asset "$TARGET_TAG" "${MATCHING_NAME}.sha1" --yes || true
-
-              # Hernoem naar de exacte originele casing
               FINAL_NAME="$MATCHING_NAME"
             else
-              # === NIEUW bestand ===
-              echo "Geen match → wordt als nieuw bestand toegevoegd"
+              echo "Nieuw bestand"
               FINAL_NAME="$ORIGINAL_NAME"
             fi
 
-            # Maak .sha1 bestand
             echo -n "$SHA1" > "${FINAL_NAME}.sha1"
-
-            # Upload nieuwe zip + sha1 naar tag 1.0
-            echo "Uploaden als $FINAL_NAME + ${FINAL_NAME}.sha1"
             mv new_pack.zip "$FINAL_NAME"
             gh release upload "$TARGET_TAG" "$FINAL_NAME" "${FINAL_NAME}.sha1" --clobber
 
-            echo "Klaar met $FINAL_NAME"
+            echo "Klaar: $FINAL_NAME"
           done
 
       - name: Verwijder tijdelijke release
@@ -115,6 +88,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEMP_TAG: ${{ github.event.release.tag_name }}
         run: |
-          echo "Tijdelijke release '$TEMP_TAG' wordt verwijderd..."
           gh release delete "$TEMP_TAG" --yes --cleanup-tag
-          echo "Opruimen voltooid. Alleen tag 1.0 blijft over."
+          echo "Tijdelijke release verwijderd."
