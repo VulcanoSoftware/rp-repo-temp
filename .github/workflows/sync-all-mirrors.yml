@@ -63,10 +63,21 @@ jobs:
 
             curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" -o "$NAME" "$URL"
 
-            # Verwijder oude versie eerst
-            glab release delete-asset "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO" --yes 2>/dev/null || true
+            PROJECT_API="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')"
 
-            glab release upload "$TARGET_TAG" "$NAME" --repo "$GITLAB_REPO"
+            UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
+
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+              --upload-file "$NAME" \
+              "$UPLOAD_URL")
+
+            if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
+              echo "   Succesvol geüpload"
+            else
+              echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
+              exit 1
+            fi
           done
 
           echo "GitLab sync voltooid."
