@@ -43,7 +43,20 @@ jobs:
           PACKAGE_BASE="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')/packages/generic/resource-pack/$TARGET_TAG"
 
           # -------------------------------------------------------
-          # 1. README forceren
+          # 1. Release volledig verwijderen (force replace)
+          # -------------------------------------------------------
+          echo "Verwijderen van release $TARGET_TAG..."
+
+          # Verwijder de hele release + alle assets
+          if glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
+            echo "Release bestaat, verwijderen..."
+            glab release delete "$TARGET_TAG" --repo "$GITLAB_REPO" --yes
+          else
+            echo "Release bestaat niet, wordt aangemaakt"
+          fi
+
+          # -------------------------------------------------------
+          # 2. README forceren
           # -------------------------------------------------------
           echo "README.md forceren op branch main..."
 
@@ -73,25 +86,22 @@ jobs:
           fi
 
           # -------------------------------------------------------
-          # 2. Release 1.0 aanmaken indien nodig
+          # 3. Nieuwe release 1.0 maken
           # -------------------------------------------------------
-          if ! glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
-            echo "Release $TARGET_TAG wordt aangemaakt"
-            glab release create "$TARGET_TAG" \
-              --repo "$GITLAB_REPO" \
-              --name "Resource Pack 1.0" \
-              --notes "Automatisch gesynchroniseerd vanaf GitHub" \
-              --ref "main"
-          fi
+          echo "Nieuwe release 1.0 maken..."
+          glab release create "$TARGET_TAG" \
+            --repo "$GITLAB_REPO" \
+            --name "Resource Pack 1.0" \
+            --notes "Automatisch gesynchroniseerd vanaf GitHub (overschreven)" \
+            --ref "main"
 
           # -------------------------------------------------------
-          # 3. Bestanden synchroniseren + mirrors.txt + force replace
+          # 4. Bestanden uploaden + mirrors.txt
           # -------------------------------------------------------
           echo "Bestanden synchroniseren..."
 
           ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
 
-          # Leeg mirrors.txt
           > mirrors.txt
 
           if [ -z "$ASSETS" ]; then
@@ -103,26 +113,11 @@ jobs:
 
               echo "→ Uploaden: $NAME"
 
-              # Download van GitHub
               curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
                 -o "$NAME" "$URL"
 
               UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
 
-              # === FORCE OVERSCHRIJVEN ===
-              # Verwijder het hele package volledig (dit verwijdert alle oude bestanden)
-              PACKAGE_LIST=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-                "$PROJECT_API/packages?package_name=resource-pack&package_version=$TARGET_TAG")
-
-              PACKAGE_ID=$(echo "$PACKAGE_LIST" | jq -r '.[0].id')
-
-              if [ "$PACKAGE_ID" != "null" ] && [ "$PACKAGE_ID" != "" ]; then
-                echo "   Package bestaat, verwijderen..."
-                curl -s -X DELETE -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-                  "$PROJECT_API/packages/$PACKAGE_ID" > /dev/null
-              fi
-
-              # Uploaden
               HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
                 --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
                 --upload-file "$NAME" \
@@ -143,7 +138,7 @@ jobs:
           cat mirrors.txt
 
           # -------------------------------------------------------
-          # 4. mirrors.txt committen
+          # 5. mirrors.txt committen
           # -------------------------------------------------------
           echo "mirrors.txt committen..."
 
