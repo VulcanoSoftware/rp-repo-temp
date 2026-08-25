@@ -110,10 +110,11 @@ jobs:
               UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
 
               # === FORCE OVERSCHRIJVEN ===
-              # Verwijder het package volledig (dit verwijdert alle bestanden + versie)
-              PACKAGE_ID=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-                "$PROJECT_API/packages?package_name=resource-pack&package_version=$TARGET_TAG" \
-                | jq -r '.[0].id')
+              # Verwijder het hele package (dit verwijdert alle oude bestanden)
+              PACKAGE_LIST=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+                "$PROJECT_API/packages?package_name=resource-pack&package_version=$TARGET_TAG")
+
+              PACKAGE_ID=$(echo "$PACKAGE_LIST" | jq -r '.[0].id')
 
               if [ "$PACKAGE_ID" != "null" ] && [ "$PACKAGE_ID" != "" ]; then
                 echo "   Package bestaat, verwijderen..."
@@ -121,7 +122,7 @@ jobs:
                   "$PROJECT_API/packages/$PACKAGE_ID" > /dev/null
               fi
 
-              # Uploaden (nu bestaat er geen package meer)
+              # Uploaden
               HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
                 --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
                 --upload-file "$NAME" \
