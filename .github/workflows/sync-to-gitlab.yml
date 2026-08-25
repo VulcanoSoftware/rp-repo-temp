@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # nodig om mirrors.txt te kunnen committen
 
 jobs:
   sync:
@@ -17,13 +17,16 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
           curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
 
-      - name: Sync GitHub → GitLab
+      - name: Sync GitHub → GitLab + generate mirrors.txt
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -38,9 +41,10 @@ jobs:
 
           PROJECT_API="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')"
           FILE_API="$PROJECT_API/repository/files/README.md"
+          PACKAGE_BASE="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')/packages/generic/resource-pack/$TARGET_TAG"
 
           # -------------------------------------------------------
-          # 1. Zorg dat er een geldige commit op main staat
+          # 1. README forceren
           # -------------------------------------------------------
           echo "README.md forceren op branch main..."
 
@@ -68,10 +72,8 @@ jobs:
               "$FILE_API" > /dev/null
           fi
 
-          echo "README.md is aanwezig"
-
           # -------------------------------------------------------
-          # 2. Zorg dat release 1.0 bestaat
+          # 2. Release 1.0 aanmaken indien nodig
           # -------------------------------------------------------
           if ! glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
             echo "Release $TARGET_TAG wordt aangemaakt"
@@ -80,50 +82,60 @@ jobs:
               --name "Resource Pack 1.0" \
               --notes "Automatisch gesynchroniseerd vanaf GitHub" \
               --ref "main"
-          else
-            echo "Release $TARGET_TAG bestaat al"
           fi
 
           # -------------------------------------------------------
-          # 3. Bestanden uploaden via Generic Package Registry
+          # 3. Bestanden synchroniseren + mirrors.txt opbouwen
           # -------------------------------------------------------
-          echo "Bestanden synchroniseren via Generic Packages..."
+          echo "Bestanden synchroniseren..."
 
           ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
 
+          # Leeg mirrors.txt
+          > mirrors.txt
+
           if [ -z "$ASSETS" ]; then
             echo "Geen bestanden gevonden op GitHub"
-            exit 0
+          else
+            echo "$ASSETS" | jq -c '.' | while read -r asset; do
+              NAME=$(echo "$asset" | jq -r '.name')
+              URL=$(echo "$asset" | jq -r '.url')
+
+              echo "→ Uploaden: $NAME"
+
+              curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
+                -o "$NAME" "$URL"
+
+              UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
+
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+                --upload-file "$NAME" \
+                "$UPLOAD_URL")
+
+              if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
+                echo "   Succesvol geüpload"
+                # Regel toevoegen aan mirrors.txt
+                echo "gitlab:${PACKAGE_BASE}/${NAME}" >> mirrors.txt
+              else
+                echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
+                exit 1
+              fi
+            done
           fi
 
-          echo "$ASSETS" | jq -c '.' | while read -r asset; do
-            NAME=$(echo "$asset" | jq -r '.name')
-            URL=$(echo "$asset" | jq -r '.url')
-
-            echo "→ Uploaden: $NAME"
-
-            # Download van GitHub
-            curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
-              -o "$NAME" "$URL"
-
-            # Upload naar GitLab Generic Package Registry
-            # URL wordt: /packages/generic/resource-pack/1.0/FILENAME
-            UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
-
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-              --upload-file "$NAME" \
-              "$UPLOAD_URL")
-
-            if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
-              echo "   Succesvol geüpload (HTTP $HTTP_STATUS)"
-            else
-              echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
-              exit 1
-            fi
-          done
-
-          echo "=== Synchronisatie succesvol voltooid ==="
           echo ""
-          echo "Bestanden zijn bereikbaar via:"
-          echo "https://gitlab.com/$GITLAB_REPO/-/packages/"
+          echo "Inhoud van mirrors.txt:"
+          cat mirrors.txt
+
+          # -------------------------------------------------------
+          # 4. mirrors.txt committen naar de GitHub repo
+          # -------------------------------------------------------
+          echo "mirrors.txt committen..."
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add mirrors.txt
+          git diff --staged --quiet || git commit -m "Update mirrors.txt (automatic sync)"
+          git push
