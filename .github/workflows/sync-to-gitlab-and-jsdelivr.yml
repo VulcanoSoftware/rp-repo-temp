@@ -1,4 +1,4 @@
-name: Sync to GitLab + jsDelivr
+name: Sync to GitLab + Cloudflare R2
 
 on:
   workflow_run:
@@ -25,30 +25,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq
           curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
+          # aws-cli staat standaard al op ubuntu-latest runners; check voor de zekerheid
+          aws --version
 
-      - name: Sync GitHub → GitLab + generate mirrors.txt
+      - name: Configureer Cloudflare R2 (S3-compatible) credentials
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws configure set aws_access_key_id "$R2_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$R2_SECRET_ACCESS_KEY"
+          aws configure set region auto
+
+      - name: Sync GitHub → GitLab + Cloudflare R2 + generate mirrors.txt
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TAG: "1.0"
           GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
-          CDN_URL: "https://cdn.jsdelivr.net/gh/vulcanosoftwareinc/rp-repo-temp@1.0"
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}   # bv. https://packs.jouwdomein.nl (custom domain op je R2-bucket)
         run: |
           set -e
 
-          echo "=== Start synchronisatie GitHub → GitLab + jsDelivr ==="
+          echo "=== Start synchronisatie GitHub → GitLab + Cloudflare R2 ==="
 
           echo "$GITLAB_TOKEN" | glab auth login --stdin --hostname gitlab.com
 
           PROJECT_API="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')"
           PACKAGE_BASE="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')/packages/generic/resource-pack/$TARGET_TAG"
+          R2_ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
           # -------------------------------------------------------
-          # 1. Release volledig verwijderen (force replace)
+          # 1. GitLab release volledig verwijderen (force replace)
           # -------------------------------------------------------
           echo "Verwijderen van release $TARGET_TAG..."
 
-          # Verwijder de hele release + alle assets
           if glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
             echo "Release bestaat, verwijderen..."
             glab release delete "$TARGET_TAG" --repo "$GITLAB_REPO" --yes
@@ -87,7 +100,7 @@ jobs:
           fi
 
           # -------------------------------------------------------
-          # 3. Nieuwe release 1.0 maken
+          # 3. Nieuwe GitLab release 1.0 maken
           # -------------------------------------------------------
           echo "Nieuwe release 1.0 maken..."
           glab release create "$TARGET_TAG" \
@@ -97,7 +110,7 @@ jobs:
             --ref "main"
 
           # -------------------------------------------------------
-          # 4. Bestanden uploaden + mirrors.txt (nu met jsDelivr)
+          # 4. Bestanden ophalen bij GitHub, uploaden naar GitLab + R2, mirrors.txt vullen
           # -------------------------------------------------------
           echo "Bestanden synchroniseren..."
 
@@ -112,11 +125,11 @@ jobs:
               NAME=$(echo "$asset" | jq -r '.name')
               URL=$(echo "$asset" | jq -r '.url')
 
-              echo "→ Uploaden: $NAME"
-
+              echo "→ Downloaden: $NAME"
               curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
                 -o "$NAME" "$URL"
 
+              # --- Upload naar GitLab Package Registry ---
               UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
 
               HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -125,13 +138,23 @@ jobs:
                 "$UPLOAD_URL")
 
               if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
-                echo "   Succesvol geüpload"
+                echo "   Succesvol geüpload naar GitLab"
                 echo "gitlab:${PACKAGE_BASE}/${NAME}" >> mirrors.txt
-                echo "jsDelivr:${CDN_URL}/${NAME}" >> mirrors.txt
               else
-                echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
+                echo "   Fout bij uploaden naar GitLab (HTTP $HTTP_STATUS)"
                 exit 1
               fi
+
+              # --- Upload naar Cloudflare R2 ---
+              echo "   Uploaden naar Cloudflare R2..."
+              aws s3 cp "$NAME" "s3://${R2_BUCKET}/${TARGET_TAG}/${NAME}" \
+                --endpoint-url "$R2_ENDPOINT"
+
+              echo "   Succesvol geüpload naar R2"
+              echo "cloudflare-r2:${R2_PUBLIC_URL}/${TARGET_TAG}/${NAME}" >> mirrors.txt
+
+              # Lokaal bestand opruimen (scheelt schijfruimte bij grote packs)
+              rm -f "$NAME"
             done
           fi
 
