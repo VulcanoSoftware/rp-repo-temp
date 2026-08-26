@@ -1,4 +1,4 @@
-name: Sync to GitLab
+name: Sync to GitLab + SourceForge
 
 on:
   workflow_run:
@@ -23,24 +23,36 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq
+          sudo apt-get install -y jq rsync
           curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
 
-      - name: Sync GitHub → GitLab + generate mirrors.txt
+      - name: SourceForge SSH instellen
+        env:
+          SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SF_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync GitHub → GitLab + SourceForge + generate mirrors.txt
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TAG: "1.0"
           GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
+          SF_USER: "jouw-sourceforge-gebruikersnaam"   # <-- aanpassen
+          SF_PROJECT: "vulcanocraft-resourcepack-src"
         run: |
           set -e
 
-          echo "=== Start synchronisatie GitHub → GitLab ==="
+          echo "=== Start synchronisatie GitHub → GitLab + SourceForge ==="
 
           echo "$GITLAB_TOKEN" | glab auth login --stdin --hostname gitlab.com
 
           PROJECT_API="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')"
           PACKAGE_BASE="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')/packages/generic/resource-pack/$TARGET_TAG"
+          SF_REMOTE_DIR="/home/frs/project/${SF_PROJECT}/${TARGET_TAG}"
 
           # -------------------------------------------------------
           # 1. Release volledig verwijderen (force replace)
@@ -96,7 +108,13 @@ jobs:
             --ref "main"
 
           # -------------------------------------------------------
-          # 4. Bestanden uploaden + mirrors.txt
+          # 4. SourceForge doelmap klaarzetten
+          # -------------------------------------------------------
+          echo "SourceForge-map voorbereiden..."
+          ssh -o StrictHostKeyChecking=no "${SF_USER}@frs.sourceforge.net" "mkdir -p ${SF_REMOTE_DIR}"
+
+          # -------------------------------------------------------
+          # 5. Bestanden synchroniseren + mirrors.txt
           # -------------------------------------------------------
           echo "Bestanden synchroniseren..."
 
@@ -116,6 +134,7 @@ jobs:
               curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
                 -o "$NAME" "$URL"
 
+              # --- GitLab Package Registry ---
               UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
 
               HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -124,10 +143,20 @@ jobs:
                 "$UPLOAD_URL")
 
               if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
-                echo "   Succesvol geüpload"
+                echo "   Succesvol geüpload naar GitLab"
                 echo "gitlab:${PACKAGE_BASE}/${NAME}" >> mirrors.txt
               else
-                echo "   Fout bij uploaden (HTTP $HTTP_STATUS)"
+                echo "   Fout bij uploaden naar GitLab (HTTP $HTTP_STATUS)"
+                exit 1
+              fi
+
+              # --- SourceForge File Release System (rsync over SSH) ---
+              echo "   Uploaden naar SourceForge..."
+              if rsync -avP -e "ssh -o StrictHostKeyChecking=no" "$NAME" "${SF_USER}@frs.sourceforge.net:${SF_REMOTE_DIR}/"; then
+                echo "   Succesvol geüpload naar SourceForge"
+                echo "sourceforge:https://sourceforge.net/projects/${SF_PROJECT}/files/${TARGET_TAG}/${NAME}/download" >> mirrors.txt
+              else
+                echo "   Fout bij uploaden naar SourceForge"
                 exit 1
               fi
             done
@@ -138,7 +167,7 @@ jobs:
           cat mirrors.txt
 
           # -------------------------------------------------------
-          # 5. mirrors.txt committen
+          # 6. mirrors.txt committen
           # -------------------------------------------------------
           echo "mirrors.txt committen..."
 
