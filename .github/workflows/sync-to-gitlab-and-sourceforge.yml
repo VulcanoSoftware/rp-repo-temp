@@ -41,7 +41,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TAG: "1.0"
           GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
-          SF_USER: "jouw-sourceforge-gebruikersnaam"   # <-- aanpassen
+          SF_USER: "vulcanocraft" 
           SF_PROJECT: "vulcanocraft-resourcepack-src"
         run: |
           set -e
