@@ -40,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TAG: "1.0"
           GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
-          SF_USER: "vulcanocraft"   # <-- VERVANG HIER JE ECHTE SOURCEFORGE GEBRUIKERSNAAM
+          SF_USER: "VulcanoCraft"   # <-- JE ECHTE SOURCEFORGE GEBRUIKERSNAAM
           SF_PROJECT: "vulcanocraft-resourcepack-src"
         run: |
           set -e
@@ -52,14 +52,11 @@ jobs:
           SF_REMOTE_DIR="/home/frs/project/${SF_PROJECT}/${TARGET_TAG}"
 
           # -------------------------------------------------------
-          # 1. Release volledig verwijderen (force replace)
+          # 1. Release volledig verwijderen
           # -------------------------------------------------------
           echo "Verwijderen van release $TARGET_TAG..."
           if glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
-            echo "Release bestaat, verwijderen..."
             glab release delete "$TARGET_TAG" --repo "$GITLAB_REPO" --yes
-          else
-            echo "Release bestaat niet, wordt aangemaakt"
           fi
 
           # -------------------------------------------------------
@@ -101,7 +98,7 @@ jobs:
             --ref "main"
 
           # -------------------------------------------------------
-          # 4. SourceForge doelmap klaarzetten
+          # 4. SourceForge map klaarzetten
           # -------------------------------------------------------
           echo "SourceForge-map voorbereiden..."
           ssh -o StrictHostKeyChecking=no "${SF_USER}@frs.sourceforge.net" "mkdir -p ${SF_REMOTE_DIR}"
@@ -112,6 +109,7 @@ jobs:
           echo "Bestanden synchroniseren..."
           ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
           > mirrors.txt
+
           if [ -z "$ASSETS" ]; then
             echo "Geen bestanden gevonden op GitHub"
           else
@@ -120,30 +118,26 @@ jobs:
               URL=$(echo "$asset" | jq -r '.url')
               echo "→ Uploaden: $NAME"
 
-              curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
-                -o "$NAME" "$URL"
+              curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" -o "$NAME" "$URL"
 
-              # --- GitLab Package Registry ---
+              # GitLab
               UPLOAD_URL="$PROJECT_API/packages/generic/resource-pack/$TARGET_TAG/$NAME"
-              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-                --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-                --upload-file "$NAME" \
-                "$UPLOAD_URL")
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --header "PRIVATE-TOKEN: $GITLAB_TOKEN" --upload-file "$NAME" "$UPLOAD_URL")
               if [ "$HTTP_STATUS" = "201" ] || [ "$HTTP_STATUS" = "200" ]; then
                 echo "   Succesvol geüpload naar GitLab"
                 echo "gitlab:${PACKAGE_BASE}/${NAME}" >> mirrors.txt
               else
-                echo "   Fout bij uploaden naar GitLab (HTTP $HTTP_STATUS)"
+                echo "   Fout bij GitLab (HTTP $HTTP_STATUS)"
                 exit 1
               fi
 
-              # --- SourceForge File Release System (rsync over SSH) ---
+              # SourceForge
               echo "   Uploaden naar SourceForge..."
               if rsync -avP -e "ssh -o StrictHostKeyChecking=no" "$NAME" "${SF_USER}@frs.sourceforge.net:${SF_REMOTE_DIR}/"; then
                 echo "   Succesvol geüpload naar SourceForge"
                 echo "sourceforge:https://sourceforge.net/projects/${SF_PROJECT}/files/${TARGET_TAG}/${NAME}/download" >> mirrors.txt
               else
-                echo "   Fout bij uploaden naar SourceForge"
+                echo "   Fout bij SourceForge"
                 exit 1
               fi
             done
