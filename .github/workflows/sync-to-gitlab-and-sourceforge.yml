@@ -25,13 +25,22 @@ jobs:
           sudo apt-get install -y jq rsync
           curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
 
-      - name: SourceForge SSH instellen
+      - name: SourceForge SSH instellen (IdentitiesOnly)
         env:
           SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
           echo "$SF_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+
+          # Dit lost de "Too many authentication failures" op
+          cat > ~/.ssh/config << EOF
+Host frs.sourceforge.net
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    StrictHostKeyChecking no
+EOF
+
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Sync GitHub → GitLab + SourceForge + generate mirrors.txt
@@ -40,7 +49,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TAG: "1.0"
           GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
-          SF_USER: "VulcanoCraft"   # <-- JE ECHTE SOURCEFORGE GEBRUIKERSNAAM
+          SF_USER: "VulcanoCraft"
           SF_PROJECT: "vulcanocraft-resourcepack-src"
         run: |
           set -e
@@ -51,17 +60,13 @@ jobs:
           PACKAGE_BASE="https://gitlab.com/api/v4/projects/$(echo $GITLAB_REPO | sed 's/\//%2F/g')/packages/generic/resource-pack/$TARGET_TAG"
           SF_REMOTE_DIR="/home/frs/project/${SF_PROJECT}/${TARGET_TAG}"
 
-          # -------------------------------------------------------
           # 1. Release volledig verwijderen
-          # -------------------------------------------------------
           echo "Verwijderen van release $TARGET_TAG..."
           if glab release view "$TARGET_TAG" --repo "$GITLAB_REPO" > /dev/null 2>&1; then
             glab release delete "$TARGET_TAG" --repo "$GITLAB_REPO" --yes
           fi
 
-          # -------------------------------------------------------
           # 2. README forceren
-          # -------------------------------------------------------
           echo "README.md forceren op branch main..."
           FILE_API="$PROJECT_API/repository/files/README.md"
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --header "PRIVATE-TOKEN: $GITLAB_TOKEN" "$FILE_API?ref=main")
@@ -87,9 +92,7 @@ jobs:
               "$FILE_API" > /dev/null
           fi
 
-          # -------------------------------------------------------
           # 3. Nieuwe release 1.0 maken
-          # -------------------------------------------------------
           echo "Nieuwe release 1.0 maken..."
           glab release create "$TARGET_TAG" \
             --repo "$GITLAB_REPO" \
@@ -97,15 +100,11 @@ jobs:
             --notes "Automatisch gesynchroniseerd vanaf GitHub (overschreven)" \
             --ref "main"
 
-          # -------------------------------------------------------
           # 4. SourceForge map klaarzetten
-          # -------------------------------------------------------
           echo "SourceForge-map voorbereiden..."
           ssh -o StrictHostKeyChecking=no "${SF_USER}@frs.sourceforge.net" "mkdir -p ${SF_REMOTE_DIR}"
 
-          # -------------------------------------------------------
           # 5. Bestanden synchroniseren + mirrors.txt
-          # -------------------------------------------------------
           echo "Bestanden synchroniseren..."
           ASSETS=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets -q '.assets[] | {name: .name, url: .url}')
           > mirrors.txt
@@ -147,9 +146,7 @@ jobs:
           echo "Inhoud van mirrors.txt:"
           cat mirrors.txt
 
-          # -------------------------------------------------------
           # 6. mirrors.txt committen
-          # -------------------------------------------------------
           echo "mirrors.txt committen..."
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
