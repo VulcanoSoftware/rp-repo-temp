@@ -107,7 +107,13 @@ jobs:
             --notes "Automatisch gesynchroniseerd vanaf GitHub (overschreven)" \
             --ref "main"
 
-          # 4. (SourceForge FRS heeft geen shell: de map wordt aangemaakt via rsync --mkpath)
+          # 4. SourceForge-map klaarzetten (FRS heeft geen shell en een oude rsync zonder --mkpath,
+          #    dus de map wordt aangemaakt door een lege lokale map te synchroniseren)
+          echo "SourceForge-map voorbereiden..."
+          EMPTY_DIR=$(mktemp -d)
+          mkdir -p "$EMPTY_DIR/$TARGET_TAG"
+          rsync -rv -e "ssh -o StrictHostKeyChecking=no" "$EMPTY_DIR/" "${SF_USER}@frs.sourceforge.net:/home/frs/project/${SF_PROJECT}/"
+          rm -rf "$EMPTY_DIR"
 
           # 5. Bestanden synchroniseren + mirrors.txt
           echo "Bestanden synchroniseren..."
@@ -137,7 +143,7 @@ jobs:
 
               # SourceForge
               echo "   Uploaden naar SourceForge..."
-              if rsync -avP --mkpath -e "ssh -o StrictHostKeyChecking=no" "$NAME" "${SF_USER}@frs.sourceforge.net:${SF_REMOTE_DIR}/"; then
+              if rsync -avP -e "ssh -o StrictHostKeyChecking=no" "$NAME" "${SF_USER}@frs.sourceforge.net:${SF_REMOTE_DIR}/"; then
                 echo "   Succesvol geüpload naar SourceForge"
                 echo "sourceforge:https://sourceforge.net/projects/${SF_PROJECT}/files/${TARGET_TAG}/${NAME}/download" >> mirrors.txt
               else
