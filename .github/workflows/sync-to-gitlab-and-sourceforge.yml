@@ -34,12 +34,13 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
 
           # Dit lost de "Too many authentication failures" op
-          cat > ~/.ssh/config << EOF
-Host frs.sourceforge.net
-    IdentityFile ~/.ssh/id_ed25519
-    IdentitiesOnly yes
-    StrictHostKeyChecking no
-EOF
+          printf '%s\n' \
+            'Host frs.sourceforge.net' \
+            '    IdentityFile ~/.ssh/id_ed25519' \
+            '    IdentitiesOnly yes' \
+            '    StrictHostKeyChecking no' \
+            > ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null || true
 
