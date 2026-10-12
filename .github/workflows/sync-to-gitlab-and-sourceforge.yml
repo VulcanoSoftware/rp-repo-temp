@@ -10,14 +10,22 @@ on:
 permissions:
   contents: write
 
+# Nooit twee syncs tegelijk; een tweede run wacht tot de eerste klaar is
+concurrency:
+  group: sync-mirrors
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Draait alleen na een geslaagde update-resourcepack run (of handmatig)
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Install tools
         run: |
