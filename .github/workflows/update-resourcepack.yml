@@ -1,92 +1,140 @@
 name: Update Resource Pack (GitHub tag 1.0)
 
 on:
+  # Tijdelijke release publiceren (of aanpassen) EN rechtstreeks wijzigingen in release 1.0
   release:
-    types: [published]
+    types: [published, edited]
+  # Handmatig starten: alleen release 1.0 opnieuw controleren/opruimen
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+# Nooit twee runs tegelijk op release 1.0; een tweede run wacht op de eerste
+concurrency:
+  group: update-resourcepack
+  cancel-in-progress: false
+
 jobs:
   update-1-0:
     runs-on: ubuntu-latest
-    if: github.event.release.tag_name != '1.0'
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TARGET_TAG: "1.0"
+      TEMP_TAG: ${{ github.event.release.tag_name }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Process uploaded zip files
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TEMP_TAG: ${{ github.event.release.tag_name }}
-          TARGET_TAG: "1.0"
+      # ------------------------------------------------------------------
+      # 1. Tijdelijke release: zips verplaatsen naar release 1.0
+      # ------------------------------------------------------------------
+      - name: Zips van tijdelijke release naar 1.0 verplaatsen
+        if: ${{ github.event_name == 'release' && github.event.release.tag_name != '1.0' }}
         run: |
           set -e
-
           echo "Tijdelijke release: $TEMP_TAG → doel: $TARGET_TAG"
 
-          # Zorg dat tag 1.0 bestaat
+          if ! gh release view "$TEMP_TAG" > /dev/null 2>&1; then
+            echo "Tijdelijke release bestaat niet (meer); niets te verplaatsen."
+            exit 0
+          fi
+
+          # Zorg dat release 1.0 bestaat
           if ! gh release view "$TARGET_TAG" > /dev/null 2>&1; then
             gh release create "$TARGET_TAG" --title "Resource Pack 1.0" --notes "Permanente release"
           fi
 
-          TEMP_ASSETS=$(gh release view "$TEMP_TAG" --json assets -q '.assets[] | select(.name | test("\\.zip$"; "i")) | {name: .name, url: .url}')
+          WORKDIR=$(mktemp -d)
 
-          if [ -z "$TEMP_ASSETS" ]; then
+          TEMP_NAMES=$(gh release view "$TEMP_TAG" --json assets -q '.assets[].name' | { grep -iE '\.zip$' || true; })
+          if [ -z "$TEMP_NAMES" ]; then
             echo "Geen .zip bestanden gevonden."
             exit 0
           fi
 
-          CURRENT_ASSETS=$(gh api "repos/${{ github.repository }}/releases/tags/$TARGET_TAG" --jq '.assets[] | {name: .name}')
+          CURRENT_NAMES=$(gh release view "$TARGET_TAG" --json assets -q '.assets[].name')
 
-          echo "$TEMP_ASSETS" | jq -c '.' | while read -r asset; do
-            ORIGINAL_NAME=$(echo "$asset" | jq -r '.name')
-            DOWNLOAD_URL=$(echo "$asset" | jq -r '.url')
-            LOWER_NAME=$(echo "$ORIGINAL_NAME" | tr '[:upper:]' '[:lower:]')
-
+          echo "$TEMP_NAMES" | while read -r ORIGINAL_NAME; do
             echo ""
             echo "=== Verwerken: $ORIGINAL_NAME ==="
 
-            MATCHING_NAME=""
-            while read -r current; do
-              CURRENT_NAME=$(echo "$current" | jq -r '.name')
-              if [ "$(echo "$CURRENT_NAME" | tr '[:upper:]' '[:lower:]')" = "$LOWER_NAME" ]; then
-                MATCHING_NAME="$CURRENT_NAME"
-                break
-              fi
-            done <<< "$(echo "$CURRENT_ASSETS" | jq -c '.')"
-
-            curl -sL -H "Accept: application/octet-stream" -H "Authorization: token $GH_TOKEN" \
-              -o "new_pack.zip" "$DOWNLOAD_URL"
-
-            SHA1=$(sha1sum new_pack.zip | awk '{print $1}')
-            echo "SHA-1: $SHA1"
+            # Bestaat dezelfde naam al in 1.0? (niet hoofdlettergevoelig)
+            MATCHING_NAME=$(echo "$CURRENT_NAMES" | { grep -ixF -- "$ORIGINAL_NAME" || true; } | head -n 1)
 
             if [ -n "$MATCHING_NAME" ]; then
               echo "Update van bestaande file: $MATCHING_NAME"
-              gh release delete-asset "$TARGET_TAG" "$MATCHING_NAME" --yes || true
-              gh release delete-asset "$TARGET_TAG" "${MATCHING_NAME}.sha1" --yes || true
               FINAL_NAME="$MATCHING_NAME"
             else
               echo "Nieuw bestand"
               FINAL_NAME="$ORIGINAL_NAME"
             fi
 
-            echo -n "$SHA1" > "${FINAL_NAME}.sha1"
-            mv new_pack.zip "$FINAL_NAME"
-            gh release upload "$TARGET_TAG" "$FINAL_NAME" "${FINAL_NAME}.sha1" --clobber
+            # Eerst downloaden, pas daarna iets verwijderen
+            gh release download "$TEMP_TAG" --pattern "$ORIGINAL_NAME" --output "$WORKDIR/$FINAL_NAME" --clobber < /dev/null
 
+            if [ -n "$MATCHING_NAME" ]; then
+              gh release delete-asset "$TARGET_TAG" "$MATCHING_NAME" --yes < /dev/null || true
+              gh release delete-asset "$TARGET_TAG" "${MATCHING_NAME}.sha1" --yes < /dev/null || true
+            fi
+
+            gh release upload "$TARGET_TAG" "$WORKDIR/$FINAL_NAME" --clobber < /dev/null
+            rm -f "$WORKDIR/$FINAL_NAME"
             echo "Klaar: $FINAL_NAME"
           done
 
-      - name: Verwijder tijdelijke release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TEMP_TAG: ${{ github.event.release.tag_name }}
+      # ------------------------------------------------------------------
+      # 2. Altijd: release 1.0 in orde brengen
+      #    - van elke zip wordt de SHA-1 opnieuw berekend en zo nodig bijgewerkt
+      #    - .sha1 bestanden zonder bijbehorende zip worden verwijderd
+      # ------------------------------------------------------------------
+      - name: Release 1.0 controleren (SHA-1 bijwerken, weeskinderen opruimen)
         run: |
-          gh release delete "$TEMP_TAG" --yes --cleanup-tag
-          echo "Tijdelijke release verwijderd."
+          set -e
+
+          if ! gh release view "$TARGET_TAG" > /dev/null 2>&1; then
+            echo "Release $TARGET_TAG bestaat niet; niets te doen."
+            exit 0
+          fi
+
+          WORKDIR=$(mktemp -d)
+          cd "$WORKDIR"
+
+          ASSET_NAMES=$(gh release view "$TARGET_TAG" --json assets -q '.assets[].name')
+
+          # a) SHA-1 van elke zip opnieuw berekenen
+          echo "$ASSET_NAMES" | { grep -iE '\.zip$' || true; } | while read -r NAME; do
+            gh release download "$TARGET_TAG" --pattern "$NAME" --clobber < /dev/null
+            NEW=$(sha1sum "$NAME" | awk '{print $1}')
+            OLD=$(gh release download "$TARGET_TAG" --pattern "${NAME}.sha1" --output - < /dev/null 2>/dev/null | tr -d '[:space:]' || true)
+
+            if [ "$NEW" != "$OLD" ]; then
+              echo "SHA-1 bijwerken voor $NAME: $NEW"
+              echo -n "$NEW" > "${NAME}.sha1"
+              gh release upload "$TARGET_TAG" "${NAME}.sha1" --clobber < /dev/null
+            else
+              echo "SHA-1 klopt al voor $NAME"
+            fi
+            rm -f "$NAME" "${NAME}.sha1"
+          done
+
+          # b) .sha1 bestanden zonder bijbehorende zip verwijderen
+          echo "$ASSET_NAMES" | { grep -E '\.sha1$' || true; } | while read -r SHA_NAME; do
+            ZIP_NAME="${SHA_NAME%.sha1}"
+            if ! echo "$ASSET_NAMES" | grep -Fxq -- "$ZIP_NAME"; then
+              echo "Wees-bestand verwijderen: $SHA_NAME (zip $ZIP_NAME bestaat niet meer)"
+              gh release delete-asset "$TARGET_TAG" "$SHA_NAME" --yes < /dev/null
+            fi
+          done
+
+      # ------------------------------------------------------------------
+      # 3. Tijdelijke release opruimen (nooit release 1.0 zelf!)
+      # ------------------------------------------------------------------
+      - name: Verwijder tijdelijke release
+        if: ${{ github.event_name == 'release' && github.event.release.tag_name != '1.0' }}
+        run: |
+          if gh release view "$TEMP_TAG" > /dev/null 2>&1; then
+            gh release delete "$TEMP_TAG" --yes --cleanup-tag
+            echo "Tijdelijke release verwijderd."
+          else
+            echo "Tijdelijke release bestond al niet meer."
+          fi
