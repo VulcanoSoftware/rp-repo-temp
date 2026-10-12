@@ -27,13 +27,48 @@ jobs:
         with:
           ref: main
 
+      # Update-resourcepack draait nu bij elke push; hier voorkomen we dat dan telkens
+      # alles opnieuw naar GitLab en SourceForge wordt geüpload. We vergelijken de
+      # bestanden van release 1.0 met de toestand van de laatste geslaagde sync.
+      - name: Is release 1.0 veranderd sinds de vorige sync?
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_TAG: "1.0"
+        run: |
+          set -e
+          if ! gh release view "$TARGET_TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "Release $TARGET_TAG bestaat niet; sync overgeslagen."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CURRENT=$(gh release view "$TARGET_TAG" --repo "${{ github.repository }}" --json assets \
+            -q '.assets[] | "\(.id) \(.name) \(.size)"' | sort | sha256sum | awk '{print $1}')
+          PREVIOUS=$(cat .mirror-state 2>/dev/null || true)
+
+          echo "state=$CURRENT" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Handmatig gestart: sync wordt altijd uitgevoerd."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$CURRENT" != "$PREVIOUS" ]; then
+            echo "Release $TARGET_TAG is veranderd: sync wordt uitgevoerd."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Geen wijzigingen aan release $TARGET_TAG sinds de vorige sync; sync overgeslagen."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install tools
+        if: ${{ steps.check.outputs.changed == 'true' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y jq rsync
           curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
 
       - name: SourceForge SSH instellen (IdentitiesOnly)
+        if: ${{ steps.check.outputs.changed == 'true' }}
         env:
           SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
         run: |
@@ -59,7 +94,9 @@ jobs:
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Sync GitHub → GitLab + SourceForge + generate mirrors.txt
+        if: ${{ steps.check.outputs.changed == 'true' }}
         env:
+          MIRROR_STATE: ${{ steps.check.outputs.state }}
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TAG: "1.0"
@@ -169,6 +206,9 @@ jobs:
           echo "mirrors.txt committen..."
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add mirrors.txt
+          # Toestand van release 1.0 bewaren; pas na een geslaagde sync, zodat een mislukte sync vanzelf opnieuw wordt geprobeerd
+          echo "$MIRROR_STATE" > .mirror-state
+          git add mirrors.txt .mirror-state
           git diff --staged --quiet || git commit -m "Update mirrors.txt (automatic sync)"
+          git pull --rebase origin main
           git push
