@@ -63,9 +63,20 @@ jobs:
       - name: Install tools
         if: ${{ steps.check.outputs.changed == 'true' }}
         run: |
+          set -e
           sudo apt-get update
           sudo apt-get install -y jq rsync
-          curl -sL https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | sudo bash
+
+          # glab met een vaste versie en directe download. Het installatiescript van glab vroeg
+          # de nieuwste versie op via de GitHub API en faalde daar soms op (lege versie).
+          GLAB_VERSION="1.22.0"
+          GLAB_TMP=$(mktemp -d)
+          curl -fsSL --retry 3 --retry-delay 2 \
+            "https://github.com/profclems/glab/releases/download/v${GLAB_VERSION}/glab_${GLAB_VERSION}_Linux_x86_64.tar.gz" \
+            -o "$GLAB_TMP/glab.tar.gz"
+          tar -xzf "$GLAB_TMP/glab.tar.gz" -C "$GLAB_TMP" bin/glab
+          sudo install -m 755 "$GLAB_TMP/bin/glab" /usr/local/bin/glab
+          glab --version
 
       - name: SourceForge SSH instellen (IdentitiesOnly)
         if: ${{ steps.check.outputs.changed == 'true' }}
