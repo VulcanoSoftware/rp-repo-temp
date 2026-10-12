@@ -30,14 +30,20 @@ jobs:
           SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SF_SSH_KEY" > ~/.ssh/id_ed25519
+          # Windows-regeleindes weghalen en zorgen voor een afsluitende newline
+          printf '%s\n' "$SF_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+
+          # Controleer dat de key geldig is en toon de fingerprint (vergelijk met SourceForge)
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
+          ssh-keygen -lf ~/.ssh/id_ed25519.pub
 
           # Dit lost de "Too many authentication failures" op
           printf '%s\n' \
             'Host frs.sourceforge.net' \
             '    IdentityFile ~/.ssh/id_ed25519' \
             '    IdentitiesOnly yes' \
+            '    BatchMode yes' \
             '    StrictHostKeyChecking no' \
             > ~/.ssh/config
           chmod 600 ~/.ssh/config
@@ -101,9 +107,7 @@ jobs:
             --notes "Automatisch gesynchroniseerd vanaf GitHub (overschreven)" \
             --ref "main"
 
-          # 4. SourceForge map klaarzetten
-          echo "SourceForge-map voorbereiden..."
-          ssh -o StrictHostKeyChecking=no "${SF_USER}@frs.sourceforge.net" "mkdir -p ${SF_REMOTE_DIR}"
+          # 4. (SourceForge FRS heeft geen shell: de map wordt aangemaakt via rsync --mkpath)
 
           # 5. Bestanden synchroniseren + mirrors.txt
           echo "Bestanden synchroniseren..."
@@ -133,7 +137,7 @@ jobs:
 
               # SourceForge
               echo "   Uploaden naar SourceForge..."
-              if rsync -avP -e "ssh -o StrictHostKeyChecking=no" "$NAME" "${SF_USER}@frs.sourceforge.net:${SF_REMOTE_DIR}/"; then
+              if rsync -avP --mkpath -e "ssh -o StrictHostKeyChecking=no" "$NAME" "${SF_USER}@frs.sourceforge.net:${SF_REMOTE_DIR}/"; then
                 echo "   Succesvol geüpload naar SourceForge"
                 echo "sourceforge:https://sourceforge.net/projects/${SF_PROJECT}/files/${TARGET_TAG}/${NAME}/download" >> mirrors.txt
               else
