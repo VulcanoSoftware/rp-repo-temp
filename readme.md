@@ -7,7 +7,7 @@ Centrale opslag voor de VulcanoCraft resource pack(s) met automatische SHA-1 gen
 Er is **één vaste release-tag**: `1.0`
 
 Deze tag bevat altijd de actuele versie van de resource pack(s).  
-De download-URL verandert **nooit**.
+De download-URL verandert *nooit*.
 
 ### Vaste URLs
 https://github.com/VulcanoSoftware/vulcanocraft_resourcepack/releases/download/1.0/VulcanoPackEnhancedExplosions.zip
