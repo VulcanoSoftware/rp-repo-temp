@@ -55,8 +55,8 @@ jobs:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TAG: "1.0"
-          GITLAB_REPO: "vulcanosoftwareinc/rp-repo-temp"
-          SF_USER: "VulcanoCraft"
+          GITLAB_REPO: ${{ secrets.GITLAB_REPO }}
+          SF_USER: ${{ secrets.SF_USER }}
           SF_PROJECT: "vulcanocraft-resourcepack-src"
         run: |
           set -e
