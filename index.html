@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VulcanoCraft Resource Pack Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="site-header">
+      <div class="header-content">
+        <div class="brand">
+          <div class="brand-logo">🔥</div>
+          <div>
+            <h1>VulcanoCraft <span class="badge-tag">Release 1.0</span></h1>
+            <p class="subtitle">Live Resource Pack Hub & Mirror Monitor</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div class="live-indicator-wrapper">
+            <span class="pulse-dot green" id="live-pulse"></span>
+            <span class="live-text" id="live-status-text">Live Synchronisatie Actief</span>
+          </div>
+          <button id="refresh-btn" class="btn btn-secondary">
+            <span class="icon">🔄</span> Verversen
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Stats Bar -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">📦</div>
+        <div class="stat-info">
+          <span class="stat-label">Beschikbare Packs</span>
+          <span class="stat-value" id="stat-total-packs">--</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📥</div>
+        <div class="stat-info">
+          <span class="stat-label">Totale Downloads</span>
+          <span class="stat-value" id="stat-total-downloads">--</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🌐</div>
+        <div class="stat-info">
+          <span class="stat-label">Actieve Mirrors</span>
+          <span class="stat-value" id="stat-active-mirrors">3 / 3</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">⏱️</div>
+        <div class="stat-info">
+          <span class="stat-label">Laatst Bijgewerkt</span>
+          <span class="stat-value" id="stat-last-updated">Laden...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Controls & Filters -->
+    <section class="controls-section">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="Zoek op pack naam of trefwoord...">
+      </div>
+
+      <div class="filter-group">
+        <span class="filter-label">Mirror Filter:</span>
+        <div class="mirror-pills" id="mirror-filters">
+          <button class="pill active" data-mirror="all">Alle Mirrors (<span id="count-all">0</span>)</button>
+          <button class="pill" data-mirror="github">GitHub (<span id="count-github">0</span>)</button>
+          <button class="pill" data-mirror="gitlab">GitLab (<span id="count-gitlab">0</span>)</button>
+          <button class="pill" data-mirror="sourceforge">SourceForge (<span id="count-sourceforge">0</span>)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content Area -->
+    <main class="main-layout">
+      <!-- Pack Cards Column -->
+      <section class="packs-section">
+        <div class="section-header">
+          <h2>Beschikbare Resource Packs</h2>
+          <span class="results-count" id="results-count">Laden...</span>
+        </div>
+        <div class="packs-grid" id="packs-container">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Resource packs worden opgeladen van live API's...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sidebar Column: Mirror Health & Event History -->
+      <aside class="sidebar-section">
+        <!-- Live Mirror Status -->
+        <div class="panel mirror-status-panel">
+          <div class="panel-header">
+            <h3>🌐 Mirror Statussen</h3>
+            <span class="status-chip chip-online" id="overall-mirror-status">Alle Systems Go</span>
+          </div>
+          <div class="mirror-status-list" id="mirror-status-list">
+            <div class="mirror-item">
+              <div class="mirror-item-info">
+                <span class="mirror-name">GitHub Release 1.0</span>
+                <span class="mirror-url">github.com</span>
+              </div>
+              <span class="badge badge-success" id="status-github">🟢 Online</span>
+            </div>
+            <div class="mirror-item">
+              <div class="mirror-item-info">
+                <span class="mirror-name">GitLab Package Registry</span>
+                <span class="mirror-url">gitlab.com</span>
+              </div>
+              <span class="badge badge-success" id="status-gitlab">🟢 Online</span>
+            </div>
+            <div class="mirror-item">
+              <div class="mirror-item-info">
+                <span class="mirror-name">SourceForge FRS Mirror</span>
+                <span class="mirror-url">sourceforge.net</span>
+              </div>
+              <span class="badge badge-success" id="status-sourceforge">🟢 Online</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Event History & Activity Log -->
+        <div class="panel events-panel">
+          <div class="panel-header">
+            <h3>📜 Event Geschiedenis & Logs</h3>
+            <button class="btn-text" id="toggle-events-btn">Ververs Live Events</button>
+          </div>
+          <p class="panel-subtitle">Automatische release & synchronisatie gebeurtenissen</p>
+          <div class="events-timeline" id="events-timeline">
+            <div class="loading-state">
+              <div class="spinner small"></div>
+              <p>Events ophalen...</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">Gekopieerd naar klembord!</div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="footer-content">
+        <p>© VulcanoSoftware - VulcanoCraft Resource Pack Hub</p>
+        <p>Automatisch gesynchroniseerd via GitHub Actions workflows op release tag <code>1.0</code></p>
+        <div class="footer-links">
+          <a href="https://github.com/VulcanoSoftware/vulcanocraft_resourcepack" target="_blank" rel="noopener">GitHub Repository ↗</a>
+          <a href="https://github.com/VulcanoSoftware/vulcanocraft_resourcepack/releases/tag/1.0" target="_blank" rel="noopener">Release 1.0 ↗</a>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
