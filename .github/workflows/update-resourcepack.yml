@@ -1,10 +1,12 @@
 name: Update Resource Pack (GitHub tag 1.0)
 
 on:
-  # Tijdelijke release publiceren (of aanpassen) EN rechtstreeks wijzigingen in release 1.0
+  # Elke push: elke branch, elke tag, elke commit
+  push:
+  # Elke wijziging aan releases
   release:
-    types: [published, edited]
-  # Handmatig starten: alleen release 1.0 opnieuw controleren/opruimen
+    types: [created, edited, published, unpublished, released, prereleased, deleted]
+  # Handmatig starten
   workflow_dispatch:
 
 permissions:
@@ -29,6 +31,7 @@ jobs:
       # 1. Tijdelijke release: zips verplaatsen naar release 1.0
       # ------------------------------------------------------------------
       - name: Zips van tijdelijke release naar 1.0 verplaatsen
+        id: move
         if: ${{ github.event_name == 'release' && github.event.release.tag_name != '1.0' }}
         run: |
           set -e
@@ -39,19 +42,18 @@ jobs:
             exit 0
           fi
 
+          TEMP_NAMES=$(gh release view "$TEMP_TAG" --json assets -q '.assets[].name' | { grep -iE '\.zip$' || true; })
+          if [ -z "$TEMP_NAMES" ]; then
+            echo "Geen .zip bestanden in de tijdelijke release; die blijft staan (nog niets verplaatst)."
+            exit 0
+          fi
+
           # Zorg dat release 1.0 bestaat
           if ! gh release view "$TARGET_TAG" > /dev/null 2>&1; then
             gh release create "$TARGET_TAG" --title "Resource Pack 1.0" --notes "Permanente release"
           fi
 
           WORKDIR=$(mktemp -d)
-
-          TEMP_NAMES=$(gh release view "$TEMP_TAG" --json assets -q '.assets[].name' | { grep -iE '\.zip$' || true; })
-          if [ -z "$TEMP_NAMES" ]; then
-            echo "Geen .zip bestanden gevonden."
-            exit 0
-          fi
-
           CURRENT_NAMES=$(gh release view "$TARGET_TAG" --json assets -q '.assets[].name')
 
           echo "$TEMP_NAMES" | while read -r ORIGINAL_NAME; do
@@ -81,6 +83,8 @@ jobs:
             rm -f "$WORKDIR/$FINAL_NAME"
             echo "Klaar: $FINAL_NAME"
           done
+
+          echo "moved=true" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------------------------------
       # 2. Altijd: release 1.0 in orde brengen
@@ -127,10 +131,35 @@ jobs:
           done
 
       # ------------------------------------------------------------------
-      # 3. Tijdelijke release opruimen (nooit release 1.0 zelf!)
+      # 3. Tag 1.0 laten meelopen met de nieuwste commit op de standaardbranch.
+      #    Bij release-events gebruikt GitHub het workflowbestand uit de commit
+      #    waar de tag naar wijst. Zonder deze stap zou tag 1.0 blijven wijzen
+      #    naar een oude versie van deze workflow.
+      # ------------------------------------------------------------------
+      - name: Tag 1.0 meebewegen met de standaardbranch
+        run: |
+          if ! TAG_SHA=$(gh api "repos/$GH_REPO/git/ref/tags/$TARGET_TAG" --jq '.object.sha' 2>/dev/null); then
+            echo "Tag $TARGET_TAG bestaat niet; overslaan."
+            exit 0
+          fi
+
+          DEFAULT_BRANCH=$(gh api "repos/$GH_REPO" --jq '.default_branch')
+          HEAD_SHA=$(gh api "repos/$GH_REPO/commits/$DEFAULT_BRANCH" --jq '.sha')
+
+          if [ "$TAG_SHA" = "$HEAD_SHA" ]; then
+            echo "Tag $TARGET_TAG wijst al naar de nieuwste commit."
+          else
+            echo "Tag $TARGET_TAG verplaatsen naar $HEAD_SHA"
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$TARGET_TAG" -f sha="$HEAD_SHA" -F force=true > /dev/null \
+              || echo "::warning::Kon tag $TARGET_TAG niet verplaatsen"
+          fi
+
+      # ------------------------------------------------------------------
+      # 4. Tijdelijke release opruimen (nooit release 1.0 zelf, en alleen
+      #    nadat er daadwerkelijk zips zijn verplaatst)
       # ------------------------------------------------------------------
       - name: Verwijder tijdelijke release
-        if: ${{ github.event_name == 'release' && github.event.release.tag_name != '1.0' }}
+        if: ${{ github.event_name == 'release' && github.event.release.tag_name != '1.0' && steps.move.outputs.moved == 'true' }}
         run: |
           if gh release view "$TEMP_TAG" > /dev/null 2>&1; then
             gh release delete "$TEMP_TAG" --yes --cleanup-tag
