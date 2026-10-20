@@ -68,26 +68,3 @@ VulcanoPackEnhancedExplosions.zip.sha1
 Inhoud van het `.sha1` bestand = alleen de 40-tekens SHA-1 hash (geen extra tekst).
 
 Dit maakt het mogelijk om de hash dynamisch op te halen zonder de hele pack te downloaden.
-
-### Aanbevolen command (voor plugins)
-/assignpack %player% https://github.com/VulcanoSoftware/vulcanocraft_resourcepack/releases/download/1.0/VulcanoPackEnhancedExplosions.zip auto
-
-Of met meerdere mirrors:
-
-/assignpack %player%   auto
-
-
----
-
-## Technische details
-
-- Workflow: `.github/workflows/update-resourcepack.yml`
-- Trigger: bij het publiceren van een nieuwe release (behalve tag `1.0`)
-- Tooling: GitHub CLI (`gh`) + `sha1sum`
-- Case-insensitive matching + behoud van originele bestandsnaam-casing
-
----
-
-## Licentie
-
-[Voeg hier je licentie toe indien gewenst]
